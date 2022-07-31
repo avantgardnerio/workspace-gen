@@ -32,9 +32,10 @@ fn update_manifests(
 ) -> anyhow::Result<()> {
     let mani_paths: Vec<_> = packages.values().collect();
     for mani_path in mani_paths {
-        let input_str = fs::read_to_string(mani_path).context("Error reading manifest")?;
+        let toml_path = mani_path.join("Cargo.toml");
+        let input_str = fs::read_to_string(&toml_path).context("Error reading manifest")?;
         let mut output_str = "".to_string();
-        let bytes = read(mani_path).context("Error reading manifest")?;
+        let bytes = read(&toml_path).context("Error reading manifest")?;
         let mani = Manifest::from_slice(&bytes).context("Error parsing manifest")?;
 
         let re = Regex::new(r"\n\[(.*)\]\n").context("Error creating regex")?;
@@ -63,7 +64,7 @@ fn update_manifests(
             }
         }
 
-        fs::write(mani_path, output_str)?;
+        fs::write(&toml_path, output_str)?;
     }
     Ok(())
 }
@@ -153,12 +154,12 @@ fn build_manifest(
             continue;
         }
         let bytes = read(path.path()).context("Error reading bytes")?;
-        let abs = path.path();
-        let relative = abs.strip_prefix(base).context("Error relativizing path")?
-            .to_str().context("Missing path")?.to_string();
-        if relative == "Cargo.toml" {
-            continue;
+        let abs = path.path().parent().ok_or(anyhow!("Error getting parent path"))?.to_path_buf();
+        let relative = diff_paths(&abs, &base).ok_or(anyhow!("Error relativizing path"))?;
+        if relative.parent().is_none() {
+            continue; // top level relative path
         }
+        let relative = relative.to_str().ok_or(anyhow!("Error getting path"))?.to_string();
         let mani = Manifest::from_slice(&bytes).context("Error reading manifest")?;
         if let Some(pkg) = mani.package.as_ref() {
             packages.insert(pkg.name.clone(), abs);
@@ -184,7 +185,7 @@ impl<'r, 't> SplitCaptures<'r, 't> {
     fn new(re: &'r Regex, text: &'t str) -> SplitCaptures<'r, 't> {
         SplitCaptures {
             finder: re.captures_iter(text),
-            text: text,
+            text,
             last: 0,
             caps: None,
         }
