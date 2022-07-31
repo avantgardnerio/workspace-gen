@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Given several subdirectories containing cargo projects, creates a parent workspace manifest file"
+repository = "https://github.com/avantgardnerio/workspace-gen"
 
 [dependencies]
 cargo_toml = "0.11.5"
