@@ -7,6 +7,7 @@ use regex::{CaptureMatches, Captures, Regex};
 
 use cargo_toml::{Dependency, DependencyDetail, DepsSet, Manifest};
 use pathdiff::diff_paths;
+use text_io::read;
 
 fn main() -> Result<(), Error> {
     // Create a new manifest
@@ -17,6 +18,14 @@ fn main() -> Result<(), Error> {
     let path = env::current_dir()?;
     build_manifest(&path, &path, &mut uber, &mut packages).context("Error building manifest")?;
 
+    println!("{} files are about to be overwritten, would you like to continue? (Y/n)",
+             packages.len() + 1);
+    let line: String = read!("{}\n");
+    if !line.is_empty() && line.to_lowercase() != "y" {
+        println!("No files were changed.");
+        return Ok(());
+    }
+
     // Rewrite manifests to refer to each other by relative path
     update_manifests(&packages)?;
 
@@ -24,6 +33,8 @@ fn main() -> Result<(), Error> {
     let bytes = toml::ser::to_vec(&uber).context("Error serializing manifest")?;
     let path = path.join("Cargo.toml");
     fs::write(path, bytes).context("Error writing file")?;
+
+    println!("Manifests have been updated!");
     Ok(())
 }
 

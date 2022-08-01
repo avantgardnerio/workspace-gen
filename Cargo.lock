@@ -110,6 +110,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "text_io"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5f0c8eb2ad70c12a6a69508f499b3051c924f4b1cfeae85bfad96e6bc5bba46"
+
+[[package]]
 name = "toml"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -126,12 +132,13 @@ checksum = "15c61ba63f9235225a22310255a29b806b907c9b8c964bcbd0a2c70f3f2deea7"
 
 [[package]]
 name = "workspace-gen"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cargo_toml",
  "configparser",
  "pathdiff",
  "regex",
+ "text_io",
  "toml",
 ]
