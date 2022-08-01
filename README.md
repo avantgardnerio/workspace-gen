@@ -2,6 +2,8 @@
 
 Given several subdirectories containing cargo projects, creates a parent workspace manifest file.
 
+Find it on [crates.io](https://crates.io/crates/workspace-gen).
+
 ## Usage
 
 ```sh
