@@ -17,14 +17,14 @@ workspace-gen --help          # display message below
 ```
 
 ```
-workspace-gen 0.2.0
+workspace-gen 0.3.0
 Given several subdirectories containing cargo projects, creates a parent workspace manifest file
 
 USAGE:
     workspace-gen <MODE>
 
 ARGS:
-    <MODE>    What mode to run the program in [possible values: local-path, git-ref]
+    <MODE>    What mode to run the program in [possible values: local-path, git-ref, version]
 
 OPTIONS:
     -h, --help       Print help information

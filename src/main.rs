@@ -24,6 +24,7 @@ struct Cli {
 enum Mode {
     LocalPath,
     GitRef,
+    Version,
 }
 
 fn main() -> Result<(), Error> {
@@ -124,9 +125,7 @@ fn replace_deps(
         let relative = diff_paths(&other_pkg.path, pkg_path).ok_or(anyhow!("Can't diff paths!"))?;
         let relative = relative.to_str().ok_or(anyhow!("Can't diff paths!"))?.to_string();
         let new_dep = match mode {
-            Mode::LocalPath => {
-                clone_path_dep(src_dep, relative)
-            }
+            Mode::LocalPath => clone_path_dep(src_dep, relative),
             Mode::GitRef => {
                 if this_pkg.git.url == other_pkg.git.url {
                     clone_path_dep(src_dep, relative)
@@ -134,6 +133,7 @@ fn replace_deps(
                     clone_git_dep(src_dep, &other_pkg.git)
                 }
             }
+            Mode::Version => clone_ver_dep(src_dep, &other_pkg.version),
         };
         let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
         let new_dep: Vec<_> = new_dep.trim().split("\n").collect();
@@ -173,6 +173,47 @@ fn clone_path_dep(src_dep: &Dependency, relative: String) -> Dependency {
                     registry: None,
                     registry_index: None,
                     path: Some(relative),
+                    git: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    features: it.features.clone(),
+                    optional: it.optional,
+                    default_features: it.default_features,
+                    package: None
+                }
+            }
+        }
+    }
+}
+
+fn clone_ver_dep(src_dep: &Dependency, version: &String) -> Dependency {
+    match src_dep {
+        Dependency::Simple(_) => {
+            Dependency::Detailed {
+                0: DependencyDetail {
+                    version: Some(version.clone()),
+                    registry: None,
+                    registry_index: None,
+                    path: None,
+                    git: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    features: vec![],
+                    optional: false,
+                    default_features: None,
+                    package: None
+                }
+            }
+        }
+        Dependency::Detailed(it) => {
+            Dependency::Detailed {
+                0: DependencyDetail {
+                    version: Some(version.clone()),
+                    registry: None,
+                    registry_index: None,
+                    path: None,
                     git: None,
                     branch: None,
                     tag: None,
