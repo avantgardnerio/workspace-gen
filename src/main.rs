@@ -31,11 +31,12 @@ fn main() -> Result<(), Error> {
 
     // Create a new manifest
     let mut uber = Manifest::from_str("[workspace]").context("Error creating manifest")?;
-    let mut packages = HashMap::<String, PackageRef>::new();
+    let mut packages = HashMap::new();
+    let mut tomls = HashMap::new();
 
     // Populate manifest by adding any manifest in subfolders
     let path = env::current_dir()?;
-    let tomls = build_manifest(&cli.mode, &path, &path, &mut uber, &mut packages, None)
+    build_manifest(&cli.mode, &path, &path, &mut uber, &mut tomls, &mut packages, None)
         .context("Error building manifest")?;
 
     println!("{} files are about to be overwritten, would you like to continue? (Y/n)",
@@ -117,29 +118,28 @@ fn replace_deps(
             None => continue,
             Some(it) => it,
         };
-        match pkg_ref {
-            PackageRef::Path(dep_path) => {
-                let relative = diff_paths(dep_path, pkg_path).ok_or(anyhow!("Can't diff paths!"))?;
+        let new_dep = match mode {
+            Mode::LocalPath => {
+                let relative = diff_paths(&pkg_ref.path, pkg_path).ok_or(anyhow!("Can't diff paths!"))?;
                 let relative = relative.to_str().ok_or(anyhow!("Can't diff paths!"))?.to_string();
-                let new_dep = clone_dep(src_dep, relative);
-                let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
-                let new_dep: Vec<_> = new_dep.trim().split("\n").collect();
-                let new_dep = new_dep.join(", ");
-                let new_dep = format!("{} = {{ {} }}", name, new_dep);
-                let re = Regex::new(format!(r#"{}\s*=\s*.*"#, name).as_ref())
-                    .context("Error creating regex")?;
-                str = re.replace_all(&str, new_dep).to_string();
+                clone_path_dep(src_dep, relative)
             }
-            PackageRef::Ref(_) => {
-                todo!("Dependencies by git ref not yet supported!")
+            Mode::GitRef => {
+                clone_git_dep(src_dep, &pkg_ref.git)
             }
-            PackageRef::Version(_) => todo!("Dependencies by version not yet supported!")
-        }
+        };
+        let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
+        let new_dep: Vec<_> = new_dep.trim().split("\n").collect();
+        let new_dep = new_dep.join(", ");
+        let new_dep = format!("{} = {{ {} }}", name, new_dep);
+        let re = Regex::new(format!(r#"{}\s*=\s*.*"#, name).as_ref())
+            .context("Error creating regex")?;
+        str = re.replace_all(&str, new_dep).to_string();
     }
     return Ok(str);
 }
 
-fn clone_dep(src_dep: &Dependency, relative: String) -> Dependency {
+fn clone_path_dep(src_dep: &Dependency, relative: String) -> Dependency {
     match src_dep {
         Dependency::Simple(_) => {
             Dependency::Detailed {
@@ -180,16 +180,57 @@ fn clone_dep(src_dep: &Dependency, relative: String) -> Dependency {
     }
 }
 
+fn clone_git_dep(src_dep: &Dependency, git_ref: &GitRef) -> Dependency {
+    match src_dep {
+        Dependency::Simple(_) => {
+            Dependency::Detailed {
+                0: DependencyDetail {
+                    version: None,
+                    registry: None,
+                    registry_index: None,
+                    path: None,
+                    git: Some(git_ref.url.clone()),
+                    branch: None,
+                    tag: None,
+                    rev: Some(git_ref.oid.to_string()),
+                    features: vec![],
+                    optional: false,
+                    default_features: None,
+                    package: None
+                }
+            }
+        }
+        Dependency::Detailed(it) => {
+            Dependency::Detailed {
+                0: DependencyDetail {
+                    version: None,
+                    registry: None,
+                    registry_index: None,
+                    path: None,
+                    git: Some(git_ref.url.clone()),
+                    branch: None,
+                    tag: None,
+                    rev: Some(git_ref.oid.to_string()),
+                    features: it.features.clone(),
+                    optional: it.optional,
+                    default_features: it.default_features,
+                    package: None
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GitRef {
     pub url: String,
     pub oid: Oid,
 }
 
-enum PackageRef {
-    Path(PathBuf),
-    Ref(GitRef),
-    Version(String),
+struct PackageRef {
+    pub path: PathBuf,
+    pub git: GitRef,
+    pub version: String,
 }
 
 fn contains_commit(
@@ -212,26 +253,23 @@ fn build_manifest(
     base: &PathBuf,
     path: &PathBuf,
     uber: &mut Manifest,
+    tomls: &mut HashMap<String, PathBuf>,
     packages: &mut HashMap<String, PackageRef>,
     mut git_ref: Option<GitRef>,
-) -> Result<HashMap<String, PathBuf>, Error> {
-    // get git ref
-    if mode == &Mode::GitRef {
-        if let Ok(repo) = Repository::open(&path) {
-            let head = repo.head().context("Error getting HEAD!")?
-                .peel_to_commit().context("Error getting commit!")?;
-            let remote = best_remote_with_commit(&repo, &head)?;
-            git_ref = Some(GitRef { url: remote, oid: head.id() });
-        }
+) -> anyhow::Result<()> {
+    if let Ok(repo) = Repository::open(&path) {
+        let head = repo.head().context("Error getting HEAD!")?
+            .peel_to_commit().context("Error getting commit!")?;
+        let remote = best_remote_with_commit(&repo, &head)?;
+        git_ref = Some(GitRef { url: remote, oid: head.id() });
     }
 
     // scan subfolders
-    let mut tomls = HashMap::new();
     let paths = path.read_dir().context("Error scanning directory")?;
     for path in paths {
         let path = path.context("Error enumerating files")?;
         if path.metadata().context("Error getting file metadata")?.is_dir() {
-            build_manifest(mode, base, &path.path(), uber, packages, git_ref.clone())
+            build_manifest(mode, base, &path.path(), uber, tomls, packages, git_ref.clone())
                 .context("Error building manifest")?;
             continue;
         }
@@ -249,12 +287,17 @@ fn build_manifest(
         let mani = Manifest::from_slice(&bytes).context("Error reading manifest")?;
         if let Some(pkg) = mani.package.as_ref() {
             println!("{} is at {:?}", pkg.name, git_ref);
-            let pkg_ref = match mode {
-                Mode::LocalPath => PackageRef::Path(abs),
-                Mode::GitRef => {
-                    todo!("Dependencies by git ref not yet supported!")
-                }
+            let git_ref = match &git_ref {
+                None => Err(anyhow!("No git repo found!"))?,
+                Some(it) => it,
             };
+            let pkg = mani.package.ok_or(anyhow!("No package found!"))?;
+            let pkg_ref = PackageRef {
+                path: abs,
+                git: git_ref.clone(),
+                version: pkg.version,
+            };
+
             packages.insert(pkg.name.clone(), pkg_ref);
             tomls.insert(pkg.name.clone(), path.path().clone());
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
@@ -265,7 +308,7 @@ fn build_manifest(
                 .exclude.push(relative.clone());
         }
     }
-    Ok(tomls)
+    Ok(())
 }
 
 fn best_remote_with_commit(
