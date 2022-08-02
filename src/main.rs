@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Error};
 use regex::{CaptureMatches, Captures, Regex};
 
 use cargo_toml::{Dependency, DependencyDetail, DepsSet, Manifest};
+use git2::Repository;
 use pathdiff::diff_paths;
 use text_io::read;
 
@@ -178,6 +179,13 @@ fn build_manifest(
                 .members.push(relative.clone());
         }
         if let Some(_) = mani.workspace.as_ref() {
+            let repo_path = path.path();
+            let repo_path = repo_path.parent().ok_or(anyhow!("Error getting parent path!"))?;
+            let repo = Repository::open(&repo_path)
+                .context(format!("Error opening repo: {:?}", repo_path))?;
+            let revspec = repo.revparse("HEAD").context("Error getting HEAD")?;
+            let hash = revspec.from().ok_or(anyhow!("Error getting revspec"))?.id();
+            println!("{:?} is at {}", repo_path, hash);
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                 .exclude.push(relative.clone());
         }
