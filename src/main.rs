@@ -71,6 +71,7 @@ fn update_manifests(
         let bytes = read(&toml_path).context("Error reading manifest")?;
         let mani = Manifest::from_slice(&bytes).context("Error parsing manifest")?;
         let pkg_path = toml_path.parent().context("Error getting parent path")?.to_path_buf();
+        let pkg_name = mani.package.unwrap().name;
 
         let re = Regex::new(r"\n\[(.*)\]\n").context("Error creating regex")?;
         let splitter = SplitCaptures::new(&re, input_str.as_str());
@@ -79,7 +80,7 @@ fn update_manifests(
             match state {
                 SplitState::Unmatched(txt) => {
                     if let Some(cur_section) = cur_section {
-                        let str = replace_deps(mode, packages, cur_section, &pkg_path, txt)
+                        let str = replace_deps(mode, packages, cur_section, &pkg_path, txt, &pkg_name)
                             .context("Unable to replace dependencies!")?;
                         output_str += str.as_str();
                     } else {
@@ -111,21 +112,27 @@ fn replace_deps(
     deps: &DepsSet,
     pkg_path: &PathBuf,
     input_str: &str,
+    pkg_name: &String,
 ) -> anyhow::Result<String> {
     let mut str = input_str.to_string();
     for (name, src_dep) in deps {
-        let pkg_ref = match packages.get(&name.clone()) {
+        let other_pkg = match packages.get(&name.clone()) {
             None => continue,
             Some(it) => it,
         };
+        let this_pkg = &packages[pkg_name];
+        let relative = diff_paths(&other_pkg.path, pkg_path).ok_or(anyhow!("Can't diff paths!"))?;
+        let relative = relative.to_str().ok_or(anyhow!("Can't diff paths!"))?.to_string();
         let new_dep = match mode {
             Mode::LocalPath => {
-                let relative = diff_paths(&pkg_ref.path, pkg_path).ok_or(anyhow!("Can't diff paths!"))?;
-                let relative = relative.to_str().ok_or(anyhow!("Can't diff paths!"))?.to_string();
                 clone_path_dep(src_dep, relative)
             }
             Mode::GitRef => {
-                clone_git_dep(src_dep, &pkg_ref.git)
+                if this_pkg.git.url == other_pkg.git.url {
+                    clone_path_dep(src_dep, relative)
+                } else {
+                    clone_git_dep(src_dep, &other_pkg.git)
+                }
             }
         };
         let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
