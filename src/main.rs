@@ -358,6 +358,8 @@ fn build_manifest(
                 uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                     .exclude.push(format!("{}/{}", relative.to_string(), exclude));
             }
+            println!("Deleting {:?}", path.path());
+            fs::remove_file(path.path())?;
         }
     }
     Ok(())
