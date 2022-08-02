@@ -1,12 +1,12 @@
 use std::{env, fs};
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
 use std::fs::read;
 use std::path::PathBuf;
 use anyhow::{anyhow, Context, Error};
 use regex::{CaptureMatches, Captures, Regex};
 
 use cargo_toml::{Dependency, DependencyDetail, DepsSet, Manifest};
-use git2::Repository;
+use git2::{BranchType, Commit, Direction, Oid, Reference, Repository};
 use pathdiff::diff_paths;
 use text_io::read;
 
@@ -17,7 +17,8 @@ fn main() -> Result<(), Error> {
 
     // Populate manifest by adding any manifest in subfolders
     let path = env::current_dir()?;
-    build_manifest(&path, &path, &mut uber, &mut packages).context("Error building manifest")?;
+    build_manifest(&path, &path, &mut uber, &mut packages, None)
+        .context("Error building manifest")?;
 
     println!("{} files are about to be overwritten, would you like to continue? (Y/n)",
              packages.len() + 1);
@@ -148,17 +149,55 @@ fn clone_dep(src_dep: &Dependency, relative: String) -> Dependency {
     }
 }
 
+struct GitRef {
+    pub url: String,
+    pub hash: String,
+}
+
+enum PackageRef {
+    Path(PathBuf),
+    Ref(GitRef),
+    Version(String),
+}
+
+fn contains_commit(
+    search: &Commit,
+    target: &Commit,
+) -> bool {
+    if search.id() == target.id() {
+        return true;
+    }
+    for parent in search.parents() {
+        if contains_commit(&parent, target) {
+            return true;
+        }
+    }
+    false
+}
+
 fn build_manifest(
     base: &PathBuf,
     path: &PathBuf,
     uber: &mut Manifest,
     packages: &mut HashMap<String, PathBuf>,
+    mut git_ref: Option<Oid>,
 ) -> Result<(), Error> {
+    // get git ref
+    if let Ok(repo) = Repository::open(&path) {
+        let head = repo.head().context("Error getting HEAD!")?
+            .peel_to_commit().context("Error getting commit!")?;
+        let remotes = best_remote_with_commit(&repo, &head)?;
+        println!("remotes={:?}", remotes);
+        git_ref = Some(head.id());
+    }
+
+    // scan subfolders
     let paths = path.read_dir().context("Error scanning directory")?;
     for path in paths {
         let path = path.context("Error enumerating files")?;
         if path.metadata().context("Error getting file metadata")?.is_dir() {
-            build_manifest(base, &path.path(), uber, packages).context("Error building manifest")?;
+            build_manifest(base, &path.path(), uber, packages, git_ref)
+                .context("Error building manifest")?;
             continue;
         }
         let name = path.file_name();
@@ -174,23 +213,62 @@ fn build_manifest(
         let relative = relative.to_str().ok_or(anyhow!("Error getting path"))?.to_string();
         let mani = Manifest::from_slice(&bytes).context("Error reading manifest")?;
         if let Some(pkg) = mani.package.as_ref() {
+            println!("{} is at {:?}", pkg.name, git_ref);
             packages.insert(pkg.name.clone(), abs);
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                 .members.push(relative.clone());
         }
         if let Some(_) = mani.workspace.as_ref() {
-            let repo_path = path.path();
-            let repo_path = repo_path.parent().ok_or(anyhow!("Error getting parent path!"))?;
-            let repo = Repository::open(&repo_path)
-                .context(format!("Error opening repo: {:?}", repo_path))?;
-            let revspec = repo.revparse("HEAD").context("Error getting HEAD")?;
-            let hash = revspec.from().ok_or(anyhow!("Error getting revspec"))?.id();
-            println!("{:?} is at {}", repo_path, hash);
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                 .exclude.push(relative.clone());
         }
     }
     Ok(())
+}
+
+fn best_remote_with_commit(
+    repo: &Repository,
+    head: &Commit
+) -> anyhow::Result<String> {
+    let order = vec!["upstream", "origin"];
+    let all_remotes = get_remotes(&repo)?;
+    let mut best_remote = None;
+    let mut best_score = usize::max_value();
+    for reference in repo.references().context("Error getting references!")? {
+        let reference = reference.context("Error getting reference!")?;
+        if !reference.is_remote() {
+            continue;
+        }
+        let name = reference.name().ok_or(anyhow!("Error getting reference name!"))?;
+        let parts: Vec<_> = name.split("/").collect();
+        if parts.len() < 3 || parts[0] != "refs" || parts[1] != "remotes" {
+            Err(anyhow!("Invalid reference name!"))?;
+        }
+        let remote = parts[2];
+        let score = order.iter().position(|it| it == &remote).unwrap_or(usize::max_value() - 1);
+        if score >= best_score {
+            continue;
+        }
+        let commit = reference.peel_to_commit().context("Error getting commit!")?;
+        if !contains_commit(&commit, &head) {
+            continue;
+        }
+        best_remote = Some(all_remotes[remote].clone());
+        best_score = score;
+    }
+    Ok(best_remote.ok_or(anyhow!("No remote found!"))?)
+}
+
+fn get_remotes(repo: &Repository) -> anyhow::Result<HashMap<String, String>> {
+    let mut remotes = HashMap::<String, String>::new();
+    for remote in &repo.remotes().context("Error getting remotes!")? {
+        let remote = remote.ok_or(anyhow!("Unable to get remote!"))?;
+        let mut remote = repo.find_remote(&remote).context("Unable to find remote!")?;
+        let url = remote.url().ok_or(anyhow!("Unable to get URL!"))?;
+        let name = remote.name().ok_or(anyhow!("Unable to get name!"))?;
+        remotes.insert(name.to_string(), url.to_string());
+    }
+    Ok(remotes)
 }
 
 struct SplitCaptures<'r, 't> {
