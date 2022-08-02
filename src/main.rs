@@ -351,9 +351,13 @@ fn build_manifest(
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                 .members.push(relative.clone());
         }
-        if let Some(_) = mani.workspace.as_ref() {
+        if let Some(mani) = mani.workspace.as_ref() {
             uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                 .exclude.push(relative.clone());
+            for exclude in &mani.exclude {
+                uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
+                    .exclude.push(format!("{}/{}", relative.to_string(), exclude));
+            }
         }
     }
     Ok(())
@@ -396,7 +400,7 @@ fn get_remotes(repo: &Repository) -> anyhow::Result<HashMap<String, String>> {
     let mut remotes = HashMap::<String, String>::new();
     for remote in &repo.remotes().context("Error getting remotes!")? {
         let remote = remote.ok_or(anyhow!("Unable to get remote!"))?;
-        let mut remote = repo.find_remote(&remote).context("Unable to find remote!")?;
+        let remote = repo.find_remote(&remote).context("Unable to find remote!")?;
         let url = remote.url().ok_or(anyhow!("Unable to get URL!"))?;
         let name = remote.name().ok_or(anyhow!("Unable to get name!"))?;
         remotes.insert(name.to_string(), url.to_string());
