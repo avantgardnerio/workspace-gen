@@ -10,9 +10,33 @@ Find it on [crates.io](https://crates.io/crates/workspace-gen).
 git clone x                   # clone a project into a subfolder
 git clone y                   # clone a 2nd project 
 cargo install workspace-gen   # add this executable to the path
-workspace-gen                 # run it with no arguments
+workspace-gen local-path      # switch paths to local for hacking
 cargo build                   # A Cargo.toml now exists, and should wrap both subprojects in a workspace!
+workspace-gen git-ref         # switch paths to git refs to share work with others
+workspace-gen --help          # display message below
 ```
+
+```
+workspace-gen 0.2.0
+Given several subdirectories containing cargo projects, creates a parent workspace manifest file
+
+USAGE:
+    workspace-gen <MODE>
+
+ARGS:
+    <MODE>    What mode to run the program in [possible values: local-path, git-ref]
+
+OPTIONS:
+    -h, --help       Print help information
+    -V, --version    Print version information
+```
+
+## Convention over configuration
+
+Tips:
+
+- To use `git-ref` mode, name the upstream remote `upstream`
+- Use an HTTP URL for fetching by setting [two separate URLS](https://stackoverflow.com/questions/2916845/different-default-remote-tracking-branch-for-git-pull-and-git-push) 
                                                          
 ## Example Output
 
