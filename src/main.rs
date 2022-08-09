@@ -393,7 +393,8 @@ fn best_remote_with_commit(
         best_remote = Some(all_remotes[remote].clone());
         best_score = score;
     }
-    Ok(best_remote.ok_or(anyhow!("No remote found!"))?)
+    let path = repo.path().to_str().ok_or(anyhow!("Can't get repo path!"))?;
+    Ok(best_remote.ok_or(anyhow!("No remote found for {}!", path))?)
 }
 
 fn get_remotes(repo: &Repository) -> anyhow::Result<HashMap<String, String>> {
