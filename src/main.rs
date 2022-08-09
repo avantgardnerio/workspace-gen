@@ -133,7 +133,13 @@ fn replace_deps(
                     clone_git_dep(src_dep, &other_pkg.git)
                 }
             }
-            Mode::Version => clone_ver_dep(src_dep, &other_pkg.version),
+            Mode::Version => {
+                if this_pkg.git.url == other_pkg.git.url {
+                    clone_path_dep(src_dep, relative)
+                } else {
+                    clone_ver_dep(src_dep, &other_pkg.version)
+                }
+            },
         };
         let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
         let new_dep: Vec<_> = new_dep.trim().split("\n").collect();
