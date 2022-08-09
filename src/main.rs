@@ -141,15 +141,78 @@ fn replace_deps(
                 }
             },
         };
-        let new_dep = toml::ser::to_string(&new_dep).context("Error serializing manifest")?;
-        let new_dep: Vec<_> = new_dep.trim().split("\n").collect();
-        let new_dep = new_dep.join(", ");
-        let new_dep = format!("{} = {{ {} }}", name, new_dep);
+        let new_dep = dep_to_string(&new_dep).context("Error serializing manifest")?;
+        let new_dep = format!("{} = {}", name, new_dep);
         let re = Regex::new(format!(r#"{}\s*=\s*.*"#, name).as_ref())
             .context("Error creating regex")?;
         str = re.replace_all(&str, new_dep).to_string();
     }
     return Ok(str);
+}
+
+fn dep_to_string(dep: &Dependency) -> anyhow::Result<String> {
+    let det = match dep {
+        Dependency::Simple(_) => Err(anyhow!("Can't serialize simple dependencies!"))?,
+        Dependency::Detailed(det) => det,
+    };
+    let mut map = HashMap::<String, String>::new();
+    let put = |map: &mut HashMap<String, String>, k: &str, v: &Option<String>| {
+        let _ = match v {
+            None => None,
+            Some(v) => map.insert(k.to_string(), format!("\"{}\"", v))
+        };
+    };
+
+    // Type of dep
+    put(&mut map, "path", &det.path);
+    put(&mut map, "version", &det.version);
+    put(&mut map, "git", &det.git);
+    if map.is_empty() {
+        Err(anyhow!("Need one of: path, version, git"))?;
+    }
+    if map.len() > 1 {
+        Err(anyhow!("Values are mutually exclusive: path, version, git"))?;
+    }
+
+    // git specific links
+    if map.contains_key("git") {
+        let mut git = HashMap::<String, String>::new();
+        put(&mut git, "branch", &det.branch);
+        put(&mut git, "tag", &det.tag);
+        put(&mut git, "rev", &det.rev);
+        if git.is_empty() {
+            Err(anyhow!("Need one of: branch, tag, rev"))?;
+        }
+        if git.len() > 1 {
+            Err(anyhow!("Values are mutually exclusive: branch, tag, rev"))?;
+        }
+        git.iter().for_each(|(k, v)| {
+            let _ = map.insert(k.clone(), v.clone());
+        });
+    }
+
+    // defaultables
+    if det.optional {
+        map.insert("optional".to_string(), "true".to_string());
+    }
+    if !det.features.is_empty() {
+        let features: Vec<_> = det.features.iter().map(|it| format!("\"{}\"", it)).collect();
+        let features = features.join(", ");
+        let features = format!("[{}]", features);
+        map.insert("features".to_string(), features);
+    }
+
+    // short-hand for version
+    if map.len() == 1 {
+        if let Some(ver) = map.get("version") {
+            return Ok(ver.clone());
+        }
+    }
+
+    // everything else
+    let terms: Vec<_> = map.iter().map(|(k, v)| format!("{} = {}", k, v)).collect();
+    let res = format!("{{ {} }}", terms.join(", "));
+    Ok(res)
 }
 
 fn clone_path_dep(src_dep: &Dependency, relative: String) -> Dependency {
