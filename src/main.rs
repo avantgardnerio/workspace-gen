@@ -1,7 +1,7 @@
 use std::{env, fs};
 use std::collections::{HashMap};
 use std::fs::read;
-use std::path::PathBuf;
+use std::path::{PathBuf};
 
 use anyhow::{anyhow, Context, Error};
 use cargo_toml::{Dependency, DependencyDetail, DepsSet, Manifest};
@@ -34,11 +34,12 @@ fn main() -> Result<(), Error> {
     let mut uber = Manifest::from_str("[workspace]").context("Error creating manifest")?;
     let mut packages = HashMap::new();
     let mut tomls = HashMap::new();
+    let mut workspaces = Vec::new();
 
     // Populate manifest by adding any manifest in subfolders
     let path = env::current_dir()?;
-    build_manifest(&cli.mode, &path, &path, &mut uber, &mut tomls, &mut packages, None)
-        .context("Error building manifest")?;
+    build_manifest(&cli.mode, &path, &path, &mut uber, &mut tomls, &mut packages, &mut workspaces,
+                   None).context("Error building manifest")?;
 
     println!("{} files are about to be overwritten, would you like to continue? (Y/n)",
              packages.len() + 1);
@@ -49,7 +50,8 @@ fn main() -> Result<(), Error> {
     }
 
     // Rewrite manifests to refer to each other by relative path
-    update_manifests(&cli.mode, &tomls, &packages)?;
+    update_manifests(&cli.mode, &tomls, &packages).context("Error updating manifests!")?;
+    rename_workspaces(&cli.mode, &workspaces).context("Error renaming workspace!")?;
 
     // Write out a new parent worksapce toml
     let bytes = toml::ser::to_vec(&uber).context("Error serializing manifest")?;
@@ -57,6 +59,20 @@ fn main() -> Result<(), Error> {
     fs::write(path, bytes).context("Error writing file")?;
 
     println!("Manifests have been updated!");
+    Ok(())
+}
+
+fn rename_workspaces(mode: &Mode, workspaces: &Vec<PathBuf>) -> anyhow::Result<()> {
+    for workspace in workspaces {
+        let new_name = match mode {
+            Mode::LocalPath => "Cargo.bak.toml",
+            Mode::GitRef => "Cargo.toml",
+            Mode::Version => "Cargo.toml",
+        };
+        let new_name = workspace.parent().ok_or(anyhow!("Parent is required!"))?
+            .join(new_name);
+        fs::rename(workspace, new_name).context("Error renaming file!")?;
+    }
     Ok(())
 }
 
@@ -372,6 +388,7 @@ fn build_manifest(
     uber: &mut Manifest,
     tomls: &mut HashMap<String, PathBuf>,
     packages: &mut HashMap<String, PackageRef>,
+    workspaces: &mut Vec<PathBuf>,
     mut git_ref: Option<GitRef>,
 ) -> anyhow::Result<()> {
     if let Ok(repo) = Repository::open(&path) {
@@ -386,12 +403,12 @@ fn build_manifest(
     for path in paths {
         let path = path.context("Error enumerating files")?;
         if path.metadata().context("Error getting file metadata")?.is_dir() {
-            build_manifest(mode, base, &path.path(), uber, tomls, packages, git_ref.clone())
+            build_manifest(mode, base, &path.path(), uber, tomls, packages, workspaces, git_ref.clone())
                 .context("Error building manifest")?;
             continue;
         }
         let name = path.file_name();
-        if name != "Cargo.toml" {
+        if name != "Cargo.toml" && name != "Cargo.bak.toml" {
             continue;
         }
         let bytes = read(path.path()).context("Error reading bytes")?;
@@ -427,6 +444,7 @@ fn build_manifest(
                 uber.workspace.as_mut().ok_or(anyhow!("workspace needed!"))?
                     .exclude.push(format!("{}/{}", relative.to_string(), exclude));
             }
+            workspaces.push(path.path());
         }
     }
     Ok(())
