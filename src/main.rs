@@ -207,7 +207,12 @@ fn dep_to_string(dep: &Dependency) -> anyhow::Result<String> {
         });
     }
 
-    // defaultables
+    match det.default_features {
+        Some(false) => {
+            map.insert("default-features".to_string(), "false".to_string());
+        },
+        _ => {}
+    }
     if det.optional {
         map.insert("optional".to_string(), "true".to_string());
     }
