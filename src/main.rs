@@ -486,7 +486,9 @@ fn best_remote_with_commit(
         best_score = score;
     }
     let path = repo.path().to_str().ok_or(anyhow!("Can't get repo path!"))?;
-    Ok(best_remote.ok_or(anyhow!("No remote found for {}!", path))?)
+    Ok(best_remote.ok_or(anyhow!(
+        "No remote found for {}. Do you have committed work that is not pushed?", path
+    ))?)
 }
 
 fn get_remotes(repo: &Repository) -> anyhow::Result<HashMap<String, String>> {
