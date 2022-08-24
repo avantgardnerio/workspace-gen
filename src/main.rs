@@ -40,6 +40,12 @@ fn main() -> Result<(), Error> {
     let path = env::current_dir()?;
     build_manifest(&cli.mode, &path, &path, &mut uber, &mut tomls, &mut packages, &mut workspaces,
                    None).context("Error building manifest")?;
+    if workspaces.len() == 0 {
+        return Err(anyhow!("No workspaces found. Are you in the correct directory?"));
+    }
+    if workspaces.len() == 1 {
+        return Err(anyhow!("Only one workspace found. Are you in the correct directory?"));
+    }
 
     println!("{} files are about to be overwritten, would you like to continue? (Y/n)",
              packages.len() + 1);
