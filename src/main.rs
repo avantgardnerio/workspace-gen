@@ -192,12 +192,15 @@ fn dep_to_string(dep: &Dependency) -> anyhow::Result<String> {
     if map.is_empty() {
         Err(anyhow!("Need one of: path, version, git"))?;
     }
-    if map.len() > 1 {
-        Err(anyhow!("Values are mutually exclusive: path, version, git"))?;
-    }
 
     // git specific links
     if map.contains_key("git") {
+        if map.contains_key("path") {
+            Err(anyhow!("Values are mutually exclusive: path, git"))?;
+        }
+        if map.contains_key("version") {
+            Err(anyhow!("Values are mutually exclusive: version, git"))?;
+        }
         let mut git = HashMap::<String, String>::new();
         put(&mut git, "branch", &det.branch);
         put(&mut git, "tag", &det.tag);
@@ -265,7 +268,7 @@ fn clone_path_dep(src_dep: &Dependency, relative: String) -> Dependency {
         Dependency::Detailed(it) => {
             Dependency::Detailed {
                 0: DependencyDetail {
-                    version: None,
+                    version: it.version.clone(),
                     registry: None,
                     registry_index: None,
                     path: Some(relative),
