@@ -239,8 +239,28 @@ fn dep_to_string(dep: &Dependency) -> anyhow::Result<String> {
         }
     }
 
+    let field_order = [
+        "path",
+        "git",
+        "branch",
+        "tag",
+        "rev",
+        "version",
+        "features",
+        "default-features",
+        "optional",
+    ];
+
     // everything else
-    let terms: Vec<_> = map.iter().map(|(k, v)| format!("{} = {}", k, v)).collect();
+    let mut terms = vec![];
+    for key in field_order.iter() {
+        let val = match map.get(&key.to_string()) {
+            Some(val) => val.clone(),
+            None => continue,
+        };
+        let text = format!("{} = {}", key, val);
+        terms.push(text);
+    }
     let res = format!("{{ {} }}", terms.join(", "));
     Ok(res)
 }
